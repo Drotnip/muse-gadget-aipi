@@ -1,0 +1,244 @@
+--- a/components/muse/muse_chat_session.cpp
++++ b/components/muse/muse_chat_session.cpp
+@@ -1513,78 +1513,194 @@
+ static void tts_data(const uint8_t *data, size_t len);
+ static void decode(void);
+ 
+-/* ElevenLabs text-to-speech: POSTs the reply text, streams the MP3 back. */
+-#define TTS_URL "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
+-#define TTS_MODEL "eleven_monolingual_v1"
++/*
++ * VoiceRSS text-to-speech: GETs the reply text, streams the MP3 back.
++ * One request per chunk of text (see TTS_CHUNK_MAX); every chunk's MP3
++ * appends to the same playback buffer, and minimp3 resyncs on each frame
++ * header, so back-to-back streams decode as one.
++ */
+ #define TTS_TIMEOUT_MS 15000
++#define TTS_CHUNK_MAX 400   /* chars per request: a few hundred keeps one
++                               chunk's MP3 (~30 s of speech) well inside
++                               MP3_BUF even before decode() has drained any */
++
++static bool s_tts_bad;      /* the response was an error page, not MP3 */
++static bool s_tts_checked;  /* the response's first bytes were inspected */
++static size_t s_tts_fed;    /* bytes handed to tts_data() this reply */
++static uint8_t s_tts_head[8];
++static size_t s_tts_head_len;
++
++static void tts_feed(const uint8_t *data, size_t len)
++{
++    s_tts_fed += len;
++    tts_data(data, len);
++    decode();
++}
+ 
+ /*
+- * Feeds MP3 straight into the playback buffer as it arrives, and runs decode()
+- * so a long reply plays while it downloads instead of needing to fit in
+- * MP3_BUF at once. Runs on the chat task, same as decode().
++ * Feeds MP3 straight into the playback buffer as it arrives, and runs
++ * decode() so a long reply plays while it downloads instead of needing to
++ * fit in MP3_BUF at once. Runs on the chat task, same as decode().
++ *
++ * VoiceRSS reports errors (bad key, over quota, ...) as a plain-text body
++ * starting "ERROR" with HTTP 200, so the first bytes of every response are
++ * held back and checked before anything reaches the decoder. An error body
++ * is swallowed whole and the fetch reports failure, which leaves the reply
++ * to silent caption pacing, exactly as when no key is set.
+  */
+ static esp_err_t tts_on_http(esp_http_client_event_t *evt)
+ {
+-    if (evt->event_id == HTTP_EVENT_ON_DATA && evt->data_len > 0) {
+-        tts_data(static_cast<const uint8_t *>(evt->data), evt->data_len);
+-        decode();
++    if (evt->event_id != HTTP_EVENT_ON_DATA || evt->data_len <= 0) {
++        return ESP_OK;
++    }
++    const uint8_t *data = static_cast<const uint8_t *>(evt->data);
++    size_t len = static_cast<size_t>(evt->data_len);
++    if (s_tts_bad) {
++        return ESP_OK;   /* an error body: swallow the rest */
++    }
++    if (!s_tts_checked) {
++        size_t want = sizeof(s_tts_head) - s_tts_head_len;
++        size_t take = len < want ? len : want;
++        memcpy(s_tts_head + s_tts_head_len, data, take);
++        s_tts_head_len += take;
++        data += take;
++        len -= take;
++        if (s_tts_head_len < sizeof(s_tts_head)) {
++            return ESP_OK;   /* too early to tell; wait for more */
++        }
++        s_tts_checked = true;
++        if (memcmp(s_tts_head, "ERROR", 5) == 0) {
++            s_tts_bad = true;
++            ESP_LOGW(TAG, "TTS: VoiceRSS returned an error, not audio");
++            return ESP_OK;
++        }
++        tts_feed(s_tts_head, s_tts_head_len);
++    }
++    if (len) {
++        tts_feed(data, len);
+     }
+     return ESP_OK;
+ }
+ 
+ /*
+- * Sends `text` to ElevenLabs and streams the MP3 reply into the playback
+- * buffer. Returns true when the whole response arrived with HTTP 200.
+- * Blocking, with a timeout; the chat task's socket poll simply waits.
++ * One VoiceRSS GET for `len` chars of text, streaming the MP3 into the
++ * playback buffer. Returns true when the request completed with HTTP 200
++ * and the body was not an error page.
+  */
+-static bool tts_fetch(const char *text)
++static bool tts_fetch_one(const char *key, const char *text, size_t len)
+ {
+-    const char *key = CONFIG_MUSE_TTS_API_KEY;
+-    if (key == nullptr || key[0] == '\0') {
+-        return false;
++    /*
++     * URL-encode the chunk: unreserved bytes pass through, everything else
++     * becomes %XX. The encoded text is at most 3x the chunk, plus the fixed
++     * parameters, so both buffers are sized off the chunk.
++     */
++    char enc[TTS_CHUNK_MAX * 3 + 1];
++    size_t e = 0;
++    for (size_t i = 0; i < len; i++) {
++        uint8_t c = static_cast<uint8_t>(text[i]);
++        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
++            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
++            enc[e++] = static_cast<char>(c);
++        } else {
++            e += snprintf(enc + e, sizeof(enc) - e, "%%%02X", c);
++        }
+     }
++    enc[e] = '\0';
+ 
+-    /* {"text": "...", "model_id": "..."} via cJSON so the text is escaped. */
+-    cJSON *body = cJSON_CreateObject();
+-    if (body == nullptr) {
+-        return false;
+-    }
+-    cJSON_AddStringToObject(body, "text", text);
+-    cJSON_AddStringToObject(body, "model_id", TTS_MODEL);
+-    char *body_str = cJSON_PrintUnformatted(body);
+-    cJSON_Delete(body);
+-    if (body_str == nullptr) {
+-        return false;
+-    }
++    const char *voice = CONFIG_VOICERSS_VOICE;
++    char url[sizeof(enc) + 192];
++    if (voice != nullptr && voice[0] != '\0') {
++        snprintf(url, sizeof(url),
++                 "https://api.voicerss.org/?key=%s&hl=en-us&v=%s&src=%s&c=MP3&f=44khz_16bit_stereo",
++                 key, voice, enc);
++    } else {
++        snprintf(url, sizeof(url),
++                 "https://api.voicerss.org/?key=%s&hl=en-us&src=%s&c=MP3&f=44khz_16bit_stereo",
++                 key, enc);
++    }
++
++    s_tts_bad = false;
++    s_tts_checked = false;
++    s_tts_head_len = 0;
+ 
+     esp_http_client_config_t cfg{};
+-    cfg.url = TTS_URL;
++    cfg.url = url;
+     cfg.timeout_ms = TTS_TIMEOUT_MS;
+     cfg.buffer_size = 4096;
+-    cfg.buffer_size_tx = 4096;
++    cfg.buffer_size_tx = 4096;   /* the request line carries the whole URL */
+     cfg.event_handler = tts_on_http;
+     cfg.crt_bundle_attach = esp_crt_bundle_attach;
+     cfg.disable_auto_redirect = true;
+     bool ok = false;
+     esp_http_client_handle_t client = esp_http_client_init(&cfg);
+     if (client != nullptr) {
+-        esp_http_client_set_method(client, HTTP_METHOD_POST);
+-        esp_http_client_set_header(client, "xi-api-key", key);
+-        esp_http_client_set_header(client, "Content-Type", "application/json");
+-        esp_http_client_set_header(client, "Accept", "audio/mpeg");
+-        esp_http_client_set_post_field(client, body_str, strlen(body_str));
+         esp_err_t err = esp_http_client_perform(client);
+         int status = esp_http_client_get_status_code(client);
+-        ok = (err == ESP_OK && status == 200);
++        ok = (err == ESP_OK && status == 200 && !s_tts_bad && s_tts_checked);
+         if (!ok) {
+-            ESP_LOGW(TAG, "TTS: ElevenLabs request failed (err=%d, http=%d)", (int)err, status);
++            ESP_LOGW(TAG, "TTS: VoiceRSS request failed (err=%d, http=%d)", (int)err, status);
+         }
+         esp_http_client_cleanup(client);
+     }
+-    cJSON_free(body_str);
+     return ok;
+ }
+ 
++/*
++ * Splits the reply into chunks of at most TTS_CHUNK_MAX chars, preferring a
++ * sentence end, then a word boundary, and fetches each in turn; the speech
++ * plays as one because every chunk appends to the same buffer. A reply is
++ * at most TEXT_MAX chars, so this is one request for a normal reply and at
++ * most three for the longest.
++ *
++ * Returns true when any audio arrived. If a later chunk fails, the speech
++ * just stops early and the captions carry on; no audio at all leaves
++ * start_tts() to pace the reply silently, as it does with no key set.
++ */
++static bool tts_fetch(const char *text)
++{
++    const char *key = CONFIG_VOICERSS_API_KEY;
++    if (key == nullptr || key[0] == '\0' || text == nullptr) {
++        return false;
++    }
++    s_tts_fed = 0;
++    size_t total = strlen(text);
++    size_t pos = 0;
++    while (pos < total) {
++        size_t len = total - pos;
++        if (len > TTS_CHUNK_MAX) {
++            len = TTS_CHUNK_MAX;
++            /* Back up to a sentence end, else a space, within the chunk. */
++            size_t cut = 0;
++            for (size_t i = len; i > len / 2; i--) {
++                char c = text[pos + i - 1];
++                if (c == '.' || c == '!' || c == '?') {
++                    cut = i;
++                    break;
++                }
++            }
++            if (!cut) {
++                for (size_t i = len; i > len / 2; i--) {
++                    if (text[pos + i - 1] == ' ') {
++                        cut = i;
++                        break;
++                    }
++                }
++            }
++            if (cut) {
++                len = cut;
++            }
++        }
++        if (!tts_fetch_one(key, text + pos, len)) {
++            break;
++        }
++        pos += len;
++        while (pos < total && text[pos] == ' ') {
++            pos++;   /* the next chunk needn't start with the gap */
++        }
++    }
++    return s_tts_fed > 0;
++}
++
+ static void start_tts(void)
+ {
+     if (s_turn.tts_msg >= 0) {
+@@ -1596,7 +1712,7 @@
+             continue;
+         }
+         /*
+-         * Speak the reply with ElevenLabs when an API key is set; otherwise
++         * Speak the reply with VoiceRSS when an API key is set; otherwise
+          * (or when the fetch fails) fall back to showing the text at reading
+          * pace, paced by silence. The TTS plumbing below is what the comment
+          * above described: MP3 streams into tts_data(), decode() plays it.

@@ -1,0 +1,40 @@
+--- a/components/muse/Kconfig
++++ b/components/muse/Kconfig
+@@ -252,17 +252,28 @@
+             (about 220 KB), which still covers a push-to-talk turn. Board
+             overlays with 2 MB of PSRAM turn it on.
+ 
+-    config MUSE_TTS_API_KEY
+-        string "ElevenLabs API key for spoken replies"
++    config VOICERSS_API_KEY
++        string "VoiceRSS API key for spoken replies"
+         depends on MUSE_HATCH
+         default ""
+         help
+-            When set, the gadget speaks Muse's replies out loud through its
+-            speaker: start_tts in muse_chat_session.cpp sends each reply's
+-            text to ElevenLabs' text-to-speech API and plays the MP3 it
+-            returns. Get a key at https://elevenlabs.io (the free tier covers
+-            casual chatting). Empty means replies stay text-only, shown as
+-            captions at reading pace. The key is baked into the firmware at
+-            build time; never commit it.
++            When set, the gadget speaks Muse's replies out loud through
++            its speaker: start_tts in muse_chat_session.cpp sends each
++            reply's text to the VoiceRSS text-to-speech API and plays the
++            MP3 it returns. Get a free key at https://www.voicerss.org
++            (the free account covers 350 requests a day, no credit card;
++            it must be activated from the email they send). Empty means
++            replies stay text-only, shown as captions at reading pace.
++            The key is baked into the firmware at build time; never
++            commit it.
++
++    config VOICERSS_VOICE
++        string "VoiceRSS voice for spoken replies"
++        depends on MUSE_HATCH
++        default ""
++        help
++            The VoiceRSS voice name for hl=en-us (the free tier offers
++            Linda, Amy, Mary, John and Mike). Empty uses the VoiceRSS
++            default voice for the language.
+ 
+ endmenu
