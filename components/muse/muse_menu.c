@@ -74,6 +74,7 @@ typedef enum {
     ITEM_SENTRY,
     ITEM_SENTRY_CAL,
 #endif
+    ITEM_ALARM,
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -95,6 +96,7 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SENTRY] = "Motion sentry",
     [ITEM_SENTRY_CAL] = "Recalibrate sentry",
 #endif
+    [ITEM_ALARM] = "Rooster alarm",
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -116,6 +118,7 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SENTRY] = "Toggle",
     [ITEM_SENTRY_CAL] = "Select",
 #endif
+    [ITEM_ALARM] = "Toggle",
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
     [ITEM_RESET] = "Select",
@@ -240,6 +243,13 @@ static void value_text(int item, char *buf, size_t n)
         strlcpy(buf, muse_settings_sentry_on() ? "On" : "Off", n);
         break;
 #endif
+    case ITEM_ALARM:
+        if (muse_settings_alarm_on()) {
+            snprintf(buf, n, "%02d:%02d", muse_settings_alarm_hour(), muse_settings_alarm_min());
+        } else {
+            strlcpy(buf, "Off", n);
+        }
+        break;
     case ITEM_BATTERY:
         p = muse_state_power();
         if (p.usb || p.battery_pct < 0) {
@@ -442,6 +452,9 @@ static void activate(int item, int direction)
         muse_menu_close();
         return;
 #endif
+    case ITEM_ALARM:
+        muse_settings_set_alarm_on(!muse_settings_alarm_on());
+        break;
     case ITEM_INFO:
         show(VIEW_STATUS);
         return;

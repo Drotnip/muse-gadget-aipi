@@ -30,6 +30,7 @@
 #if CONFIG_MUSE_CSI_SENTRY
 #include "csi_sentry.h"
 #endif
+#include "alarm_clock.h"
 
 void app_main(void) {
 #if CONFIG_MUSE_POWER_TEST
@@ -65,5 +66,6 @@ void app_main(void) {
 #if CONFIG_MUSE_CSI_SENTRY
     csi_sentry_start();
 #endif
+    alarm_clock_start();
     app_run();
 }

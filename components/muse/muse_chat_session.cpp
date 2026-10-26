@@ -1412,6 +1412,66 @@ static void sentry_marker_scan(msg_t &m)
 }
 #endif
 
+/* Muse can set the rooster alarm with a marker in a reply:
+ * "[ALARM:07:30]" sets the time and switches the alarm on, "[ALARM:OFF]"
+ * switches it off. Taken out here like the sentry marker, so it is never
+ * spoken or captioned. */
+static void alarm_marker_scan(msg_t &m)
+{
+    if (!s_turn.texts || !m.len) {
+        return;
+    }
+    char *full = s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX;
+    char *hit = strstr(full, "[ALARM:OFF]");
+    if (hit) {
+        muse_settings_set_alarm_on(false);
+        ESP_LOGI(TAG, "rooster alarm off (reply marker)");
+        char *end = hit + strlen("[ALARM:OFF]");
+        if (hit > full && hit[-1] == ' ') {
+            hit--;
+        } else if (*end == ' ') {
+            end++;
+        }
+        memmove(hit, end, strlen(end) + 1);
+        m.len = strlen(full);
+        return;
+    }
+    hit = strstr(full, "[ALARM:");
+    if (!hit) {
+        return;
+    }
+    /* Parse "[ALARM:HH:MM]" by hand: one or two digits, a colon, one or
+     * two digits, then the closing bracket. Anything else is left alone. */
+    const char *p = hit + strlen("[ALARM:");
+    int hh = 0, mm = 0, n = 0;
+    while (p[n] >= '0' && p[n] <= '9') {
+        hh = hh * 10 + (p[n] - '0');
+        n++;
+    }
+    if (n == 0 || n > 2 || p[n] != ':') {
+        return;
+    }
+    n++;
+    int mstart = n;
+    while (p[n] >= '0' && p[n] <= '9') {
+        mm = mm * 10 + (p[n] - '0');
+        n++;
+    }
+    if (n == mstart || n - mstart > 2 || p[n] != ']' || hh > 23 || mm > 59) {
+        return;
+    }
+    muse_settings_set_alarm(hh, mm);
+    ESP_LOGI(TAG, "rooster alarm set %02d:%02d (reply marker)", hh, mm);
+    char *end = (char *)p + n + 1;
+    if (hit > full && hit[-1] == ' ') {
+        hit--;
+    } else if (*end == ' ') {
+        end++;
+    }
+    memmove(hit, end, strlen(end) + 1);
+    m.len = strlen(full);
+}
+
 static void message_done(int i, const char *final_text)
 {
     msg_t &m = s_turn.msgs[i];
@@ -1437,6 +1497,7 @@ static void message_done(int i, const char *final_text)
 #if CONFIG_MUSE_CSI_SENTRY
     sentry_marker_scan(m);
 #endif
+    alarm_marker_scan(m);
     if (m.len && m.tts == TTS_NONE) {
         m.tts = TTS_QUEUED;
     }

@@ -98,6 +98,11 @@ static bool s_calibrating;
 static float s_calib_progress;
 static sentry_state_t s_state = SENTRY_NO_WIFI;
 static uint32_t s_frames_total, s_frames_this_sec, s_fps;
+/* A radio that never starts used to fail silently: no frames, no
+ * calibration, no caption, nothing on screen. Track the outage so the task
+ * can say so instead. */
+static int64_t s_radio_down_since_us;
+static int64_t s_radio_fail_shown_us;
 static int64_t s_fps_window_start;
 
 // --- calibration accumulators ---
@@ -126,6 +131,12 @@ static bool s_no_signal;   // the NO SIGNAL caption is up; re-arms on a frame
 static uint32_t s_cap_ver;
 static bool s_cap_mine;
 static int64_t s_cap_until_us;
+/* A caption that could not be shown yet because Muse was talking: the
+ * latest one is held here and shown when the gadget goes idle again, so
+ * a motion note is never silently swallowed by a voice turn. */
+static char s_cap_pending[MUSE_CAPTION_MAX];
+static int s_cap_pending_hold_s;
+static bool s_cap_has_pending;
 
 static inline int64_t now_us(void) { return esp_timer_get_time(); }
 
@@ -140,14 +151,11 @@ static void set_state(sentry_state_t st)
 
 // ---------------- captions ----------------
 
-// Shows a caption only while the gadget is idle, so a sentry note never
-// talks over a conversation, and remembers it is ours so it can be cleared
-// later if nobody else has replaced it.
-static void caption_show(const char *text, int hold_s)
+// Shows a caption right now and remembers it is ours so it can be cleared
+// later if nobody else has replaced it. Callers decide whether the moment
+// is right; caption_show holds the note when it is not.
+static void caption_show_now(const char *text, int hold_s)
 {
-    if (muse_state_mode(NULL) != MUSE_MODE_IDLE) {
-        return;
-    }
     muse_state_set_caption("%s", text);
     char buf[MUSE_CAPTION_MAX];
     while (muse_state_caption(buf, sizeof(buf), &s_cap_ver)) {
@@ -157,8 +165,32 @@ static void caption_show(const char *text, int hold_s)
     s_cap_until_us = now_us() + (int64_t)hold_s * 1000000;
 }
 
+/* Showing a sentry note used to be all-or-nothing on the idle mode: a note
+ * that fired while Muse was talking was dropped silently, and a gadget
+ * stuck out of idle (for example in the error mode, which nothing returns
+ * from) never showed a note again. Now the latest note is held and shown
+ * when the gadget goes idle, and the error mode shows notes too — nothing
+ * else is coming there. */
+static void caption_show(const char *text, int hold_s)
+{
+    muse_mode_t mode = muse_state_mode(NULL);
+    if (mode == MUSE_MODE_IDLE || mode == MUSE_MODE_ERROR) {
+        caption_show_now(text, hold_s);
+        return;
+    }
+    strlcpy(s_cap_pending, text, sizeof(s_cap_pending));
+    s_cap_pending_hold_s = hold_s;
+    s_cap_has_pending = true;
+}
+
 static void caption_poll(int64_t now)
 {
+    if (s_cap_has_pending && muse_state_mode(NULL) == MUSE_MODE_IDLE &&
+        (!s_cap_mine || now >= s_cap_until_us)) {
+        s_cap_has_pending = false;
+        caption_show_now(s_cap_pending, s_cap_pending_hold_s);
+        return;
+    }
     if (!s_cap_mine || now < s_cap_until_us) {
         return;
     }
@@ -593,6 +625,23 @@ static void sentry_task(void *arg)
         if (s_radio_on) {
             nosignal_poll(now_us());
             alert_poll(now_us());
+        }
+        /* Radio wanted but not up: after 10 s of outage, say so on screen,
+         * and repeat every minute while it stays down. Sentry-off and
+         * Wi-Fi-down never reach this branch, so they stay silent. */
+        if (on && up && s_inited && !s_radio_on) {
+            int64_t now = now_us();
+            if (!s_radio_down_since_us) {
+                s_radio_down_since_us = now;
+            }
+            if (now - s_radio_down_since_us >= 10 * 1000000LL &&
+                now - s_radio_fail_shown_us >= 60 * 1000000LL) {
+                s_radio_fail_shown_us = now;
+                ESP_LOGW(TAG, "sentry radio still down; showing NO SIGNAL");
+                caption_show("SENTRY: NO SIGNAL", NO_SIGNAL_CAPTION_S);
+            }
+        } else {
+            s_radio_down_since_us = 0;
         }
         caption_poll(now_us());
     }

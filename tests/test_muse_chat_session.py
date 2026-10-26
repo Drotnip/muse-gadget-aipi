@@ -57,10 +57,16 @@ static void turn_finish() { s_turn.phase = P_IDLE; }
 static void turn_fail(const char *) { turn_finish(); }
 static bool ensure_connected() { return true; }
 bool muse_hatch_configured() { return true; }
+static bool alarm_on_called, alarm_on_value, alarm_set_called;
+static int alarm_set_hh, alarm_set_mm;
+void muse_settings_set_alarm_on(bool on) { alarm_on_called = true; alarm_on_value = on; }
+void muse_settings_set_alarm(int hh, int mm) { alarm_set_called = true; alarm_set_hh = hh; alarm_set_mm = mm; }
 static void resampler_init(resampler_t *, int, int) {}
 ''' + reset + handlers + r'''
 static void begin(bool typed = false) {
     assert(turn_start(s_turn.gen + 1, typed));
+    static char textbuf[MAX_MSGS * TEXT_MAX];  // the production PSRAM text buffer, absent in this harness
+    s_turn.texts = textbuf;
     s_turn.phase = P_WAIT_REPLY;
     s_turn.acked = true;
     strlcpy(s_turn.user_ids[0], "note", sizeof(s_turn.user_ids[0]));
@@ -128,12 +134,31 @@ static void bounded_rejections() {
     event("message.assistant", "second", "note", "Second");
     assert(s_turn.nmsgs == 2 && s_turn.msgs[0].done && s_turn.msgs[1].done);
 }
+static void alarm_marker() {
+    begin();
+    alarm_set_called = alarm_on_called = false;
+    event("delta.message_start", "reply", "note");
+    event("delta.text_append", "reply", "", "Set [ALARM:07:30]");
+    event("delta.message_done", "reply");
+    assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done);
+    assert(alarm_set_called && alarm_set_hh == 7 && alarm_set_mm == 30);
+    assert(s_turn.msgs[0].len == 3);  // "Set": the marker is stripped, not captioned
+    begin();
+    alarm_set_called = alarm_on_called = false;
+    event("delta.message_start", "reply", "note");
+    event("delta.text_append", "reply", "", "Off [ALARM:OFF]");
+    event("delta.message_done", "reply");
+    assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done);
+    assert(alarm_on_called && !alarm_on_value);
+    assert(s_turn.msgs[0].len == 3);  // "Off"
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
+    case 3: alarm_marker(); break;
     default: return 2;
     }
 }
@@ -166,3 +191,6 @@ int main(int argc, char **argv) {
 
     def test_rejection_capacity_preserves_correlation(self):
         self.run_case(2)
+
+    def test_alarm_markers_set_and_strip(self):
+        self.run_case(3)

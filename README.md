@@ -20,16 +20,20 @@ the boards below.
   avatar and captions.
 - **VoiceRSS text-to-speech** — spoken replies (voice "Mike", en-us).
   See `docs/tts-voicerss/` for how the TTS swap was done.
-- **Pond Sentry** — Wi-Fi CSI motion sensing (see below, and read the
-  known issue first).
+- **Pond Sentry** — Wi-Fi CSI motion sensing (see below).
+- **Rooster crow alarm** — a daily alarm clock: set it from a Muse
+  reply (`[ALARM:07:30]`, `[ALARM:OFF]`) or the on-screen menu
+  ("Rooster alarm"); at the set time the gadget crows three times.
 
-## ⚠️ Known issue — Pond Sentry motion caption is BROKEN
+## Pond Sentry motion caption — fixed in v3, awaiting on-device test
 
-Plainly: the sentry's motion caption does not work right now. When
-motion is sensed, **no caption appears on screen**. The voice gadget
-itself works fine — only the sentry caption is broken, and the fix is
-still owed. Do not treat the sentry as fully working until this note
-is removed.
+The sentry caption path is fixed: a caption that fires while Muse is
+talking is now held and shown when the gadget goes idle, instead of
+being dropped silently, and a radio that never starts now says
+SENTRY: NO SIGNAL on screen instead of failing silently. The fix is
+in `main/csi_sentry.c` (v3 build). It has not yet been confirmed on
+the gadget itself — that check happens when the v3 build goes out
+over OTA.
 
 What the sentry is meant to do: the gadget joins your Wi-Fi and watches
 the radio signal (CSI) for movement nearby, after a 20-second

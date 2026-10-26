@@ -63,6 +63,11 @@ bool muse_settings_ble_on(void);
 /* The motion sentry's runtime switch; on unless turned off. Only read
  * where CONFIG_MUSE_CSI_SENTRY is built in. */
 bool muse_settings_sentry_on(void);
+/* Rooster crow alarm: on/off plus the time it crows, kept in NVS.
+ * Polled directly by the alarm task. */
+bool muse_settings_alarm_on(void);
+int muse_settings_alarm_hour(void);
+int muse_settings_alarm_min(void);
 
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1]);
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);
@@ -78,6 +83,9 @@ void muse_settings_set_sleep_s(int secs);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);
 void muse_settings_set_sentry_on(bool on);
+void muse_settings_set_alarm_on(bool on);
+/* Sets the rooster alarm's time and switches it on. */
+void muse_settings_set_alarm(int hour, int min);
 /* Asks the motion sentry to throw away its stored calibration and learn a
  * fresh one. A momentary nudge, not a setting: RAM only, counted, and the
  * sentry task polls the count. Only acted on where CONFIG_MUSE_CSI_SENTRY

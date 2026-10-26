@@ -40,6 +40,9 @@ static struct {
     bool wifi_on;
     bool ble_on;
     bool sentry_on;
+    bool alarm_on;
+    uint8_t alarm_hour;
+    uint8_t alarm_min;
     char ssid[MUSE_SSID_MAX + 1];
     char pass[MUSE_PASS_MAX + 1];
     char host[MUSE_HOST_MAX + 1];
@@ -53,6 +56,9 @@ static struct {
     .sleep_s = 120,
     .wifi_on = true,
     .sentry_on = true,
+    .alarm_on = false,
+    .alarm_hour = 7,
+    .alarm_min = 0,
     .host = DEFAULT_HOST,
 };
 
@@ -132,6 +138,11 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "sentry", &b) == ESP_OK) {
         s.sentry_on = b;
     }
+    if (nvs_get_u8(s_nvs, "alarm_on", &b) == ESP_OK) {
+        s.alarm_on = b;
+    }
+    load_u8("alarm_hr", &s.alarm_hour);
+    load_u8("alarm_mi", &s.alarm_min);
     load_str("ssid", s.ssid, sizeof(s.ssid));
     load_str("pass", s.pass, sizeof(s.pass));
     load_str("host", s.host, sizeof(s.host));
@@ -141,6 +152,8 @@ esp_err_t muse_settings_init(void)
     s.volume = clampi(s.volume, 0, 100);
     s.mic_gain = clampi(s.mic_gain, 0, MUSE_MIC_GAIN_MAX);
     s.brightness = clampi(s.brightness, 10, 100);
+    s.alarm_hour = clampi(s.alarm_hour, 0, 23);
+    s.alarm_min = clampi(s.alarm_min, 0, 59);
     ESP_LOGI(TAG, "vol %d%s, mic %d dB, bright %d, sleep %ds, wifi %s (%s), ble %s, muse %s",
              s.volume, s.speaker_on ? "" : " (speaker off)", s.mic_gain, s.brightness, s.sleep_s, s.wifi_on ? "on" : "off",
              "network saved by Link", s.ble_on ? "on" : "off", s.token[0] ? "token set" : "no token");
@@ -160,6 +173,9 @@ int muse_settings_sleep_s(void) { return s.sleep_s; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
 bool muse_settings_sentry_on(void) { return s.sentry_on; }
+bool muse_settings_alarm_on(void) { return s.alarm_on; }
+int muse_settings_alarm_hour(void) { return s.alarm_hour; }
+int muse_settings_alarm_min(void) { return s.alarm_min; }
 
 /* Home Link owns the saved networks (this is the first); the local copy is only a fallback. */
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1])
@@ -252,6 +268,25 @@ void muse_settings_set_sentry_on(bool on)
     s.sentry_on = on;
     save_u8("sentry", on);
     notify(MUSE_SETTING_SENTRY);
+}
+
+/* Rooster crow alarm: on/off plus the time it crows, kept in NVS. The
+ * alarm task polls these directly, and there is no app UI for them, so
+ * these setters do not notify. */
+void muse_settings_set_alarm_on(bool on)
+{
+    s.alarm_on = on;
+    save_u8("alarm_on", on);
+}
+
+void muse_settings_set_alarm(int hour, int min)
+{
+    s.alarm_hour = clampi(hour, 0, 23);
+    s.alarm_min = clampi(min, 0, 59);
+    save_u8("alarm_hr", s.alarm_hour);
+    save_u8("alarm_mi", s.alarm_min);
+    s.alarm_on = true;
+    save_u8("alarm_on", true);
 }
 
 /* Recalibration nudges for the motion sentry: counted in RAM, never saved. */
