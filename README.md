@@ -24,6 +24,8 @@ the boards below.
 - **Rooster crow alarm** — a daily alarm clock: set it from a Muse
   reply (`[ALARM:07:30]`, `[ALARM:OFF]`) or the on-screen menu
   ("Rooster alarm"); at the set time the gadget crows three times.
+  v4 fixes silent crowing while the gadget rests on battery: the alarm
+  now powers the speaker up before crowing, then lets it sleep again.
 
 ## Pond Sentry motion caption — fixed in v3, awaiting on-device test
 

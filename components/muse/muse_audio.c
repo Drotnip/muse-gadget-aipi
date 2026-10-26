@@ -185,6 +185,14 @@ void muse_audio_power(bool on)
     unlock();
 }
 
+bool muse_audio_is_powered(void)
+{
+    lock();
+    bool open = s_open;
+    unlock();
+    return open;
+}
+
 void muse_audio_set_volume(int volume)
 {
     lock();

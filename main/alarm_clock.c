@@ -54,6 +54,13 @@ static void crow_alarm(void)
     if (!muse_board || !muse_board->audio_init) {
         return;  // display-only board: nothing to crow through
     }
+    /* The voice loop powers the codecs down while the gadget rests on
+     * battery, and writes need power on: crowing through a powered-down
+     * speaker fails silently. So open the codecs first, and put them back
+     * to sleep afterwards — unless a conversation started mid-crow, in
+     * which case the voice loop owns the audio now. */
+    bool power_was_on = muse_audio_is_powered();
+    muse_audio_power(true);
     /* An alarm that stays silent because the speaker was muted is a broken
      * alarm: crow through the mute, then put the setting back. */
     bool was_on = muse_settings_speaker_on();
@@ -73,6 +80,9 @@ static void crow_alarm(void)
     muse_state_set_caption("%s", "");
     if (!was_on) {
         muse_settings_set_speaker_on(false);
+    }
+    if (!power_was_on && muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+        muse_audio_power(false);
     }
 }
 
@@ -123,7 +133,7 @@ void alarm_clock_start(void)
         return;
     }
     started = true;
-    if (xTaskCreate(alarm_task, "rooster_alarm", 4096, NULL, 3, NULL) != pdPASS) {
+    if (xTaskCreate(alarm_task, "rooster_alarm", 6144, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "failed to start the alarm task");
     }
 }
