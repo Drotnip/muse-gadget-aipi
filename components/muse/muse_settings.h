@@ -86,6 +86,9 @@ void muse_settings_set_sentry_on(bool on);
 void muse_settings_set_alarm_on(bool on);
 /* Sets the rooster alarm's time and switches it on. */
 void muse_settings_set_alarm(int hour, int min);
+/* Sets the rooster alarm's time only, leaving on/off exactly as it is,
+ * so the menu can change the time without forcing the alarm on. */
+void muse_settings_set_alarm_time(int hour, int min);
 /* Asks the motion sentry to throw away its stored calibration and learn a
  * fresh one. A momentary nudge, not a setting: RAM only, counted, and the
  * sentry task polls the count. Only acted on where CONFIG_MUSE_CSI_SENTRY

@@ -289,6 +289,14 @@ void muse_settings_set_alarm(int hour, int min)
     save_u8("alarm_on", true);
 }
 
+void muse_settings_set_alarm_time(int hour, int min)
+{
+    s.alarm_hour = clampi(hour, 0, 23);
+    s.alarm_min = clampi(min, 0, 59);
+    save_u8("alarm_hr", s.alarm_hour);
+    save_u8("alarm_mi", s.alarm_min);
+}
+
 /* Recalibration nudges for the motion sentry: counted in RAM, never saved. */
 static volatile uint32_t s_sentry_cal_requests;
 

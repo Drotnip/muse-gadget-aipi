@@ -26,6 +26,12 @@ the boards below.
   ("Rooster alarm"); at the set time the gadget crows three times.
   v4 fixes silent crowing while the gadget rests on battery: the alarm
   now powers the speaker up before crowing, then lets it sleep again.
+  v5 adds a "Rooster time" menu row after "Rooster alarm" that steps
+  the alarm time in 15-minute steps (wrapping 23:45 to 00:00) without
+  changing on/off, so the time can be set with buttons alone.
+  v6 adds a short idle tune (C, E, G, high C, about one second) at
+  09:00, 13:00 and 18:00, only while the gadget is already awake and
+  idle — it never wakes the gadget from standby to play.
 
 ## Pond Sentry motion caption — fixed in v3, awaiting on-device test
 

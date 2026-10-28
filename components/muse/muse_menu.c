@@ -75,6 +75,7 @@ typedef enum {
     ITEM_SENTRY_CAL,
 #endif
     ITEM_ALARM,
+    ITEM_ALARM_TIME,
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -97,6 +98,7 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SENTRY_CAL] = "Recalibrate sentry",
 #endif
     [ITEM_ALARM] = "Rooster alarm",
+    [ITEM_ALARM_TIME] = "Rooster time",
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -119,6 +121,7 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SENTRY_CAL] = "Select",
 #endif
     [ITEM_ALARM] = "Toggle",
+    [ITEM_ALARM_TIME] = "Change",
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
     [ITEM_RESET] = "Select",
@@ -249,6 +252,11 @@ static void value_text(int item, char *buf, size_t n)
         } else {
             strlcpy(buf, "Off", n);
         }
+        break;
+    case ITEM_ALARM_TIME:
+        /* Always show the stored time, even when the alarm is off, so
+         * the time can be set first and switched on afterwards. */
+        snprintf(buf, n, "%02d:%02d", muse_settings_alarm_hour(), muse_settings_alarm_min());
         break;
     case ITEM_BATTERY:
         p = muse_state_power();
@@ -455,6 +463,21 @@ static void activate(int item, int direction)
     case ITEM_ALARM:
         muse_settings_set_alarm_on(!muse_settings_alarm_on());
         break;
+    case ITEM_ALARM_TIME: {
+        /* Quarter-hour steps only: 0, 15, 30, 45, then the next hour.
+         * Snaps to the grid first, so an off-grid time set by voice
+         * (e.g. 7:20) steps to the next quarter (7:30) instead of
+         * drifting to 7:35. Wraps 23:45 back to 00:00. Leaves on/off
+         * untouched, so setting the time never forces the alarm on. */
+        int total = muse_settings_alarm_hour() * 60 + muse_settings_alarm_min();
+        int next = ((total / 15) + 1) * 15;
+        if (direction < 0) {
+            next = ((total - 1 + 1440) / 15) * 15;
+        }
+        next %= 1440;
+        muse_settings_set_alarm_time(next / 60, next % 60);
+        break;
+    }
     case ITEM_INFO:
         show(VIEW_STATUS);
         return;
@@ -496,7 +519,8 @@ static void handle(muse_menu_key_t key)
             refresh();
         } else if (key == MUSE_MENU_SELECT) {
             activate(s_sel, 1);
-        } else if ((key == MUSE_MENU_LEFT || key == MUSE_MENU_RIGHT) && s_sel <= ITEM_WIFI) {
+        } else if ((key == MUSE_MENU_LEFT || key == MUSE_MENU_RIGHT) &&
+                   (s_sel <= ITEM_WIFI || s_sel == ITEM_ALARM_TIME)) {
             activate(s_sel, key == MUSE_MENU_LEFT ? -1 : 1);
         }
         break;
