@@ -21,9 +21,12 @@ the boards below.
 - **VoiceRSS text-to-speech** — spoken replies (voice "Mike", en-us).
   See `docs/tts-voicerss/` for how the TTS swap was done.
 - **Pond Sentry** — Wi-Fi CSI motion sensing (see below).
-- **Rooster crow alarm** — a daily alarm clock: set it from a Muse
+- **Rooster crow alarm** — a daily alarm clock, and a moveable task
+  reminder, not one fixed alarm: set it from a Muse
   reply (`[ALARM:07:30]`, `[ALARM:OFF]`) or the on-screen menu
   ("Rooster alarm"); at the set time the gadget crows three times.
+  Move the time whenever you need a nudge for a different task —
+  the time is meant to be changed, not left on one setting.
   v4 fixes silent crowing while the gadget rests on battery: the alarm
   now powers the speaker up before crowing, then lets it sleep again.
   v5 adds a "Rooster time" menu row after "Rooster alarm" that steps
